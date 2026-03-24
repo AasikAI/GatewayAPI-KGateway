@@ -1,0 +1,116 @@
+# ================================================================
+# gateway.yaml  –  Replaces k8s/ingress.yaml (gateway-level parts)
+# Namespace  : banking
+# Controller : Envoy Gateway
+# ================================================================
+#
+# Annotation migration map (from ingress.yaml):
+#
+#   nginx annotation                          → Gateway API equivalent
+#   ────────────────────────────────────────  ─────────────────────────────────────
+#   enable-cors + cors-allow-origin: "*"   →  SecurityPolicy      (resource #3)
+#   proxy-body-size: "10m"                 →  ClientTrafficPolicy (resource #4)
+#
+# ================================================================
+
+# ── 1. GatewayClass ─────────────────────────────────────────────
+# Cluster-scoped. Tells Kubernetes which controller owns Gateways
+# that reference this class.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy-gateway
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+
+---
+
+# ── 2. Gateway ───────────────────────────────────────────────────
+# The L7 entry-point – replaces the Ingress resource's
+# host/listener declaration.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: banking-gateway
+  namespace: banking
+spec:
+  gatewayClassName: envoy-gateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same        # only HTTPRoutes in the 'banking' namespace
+
+  # ── Optional HTTPS listener ────────────────────────────────────
+  # Uncomment once you have a TLS secret ready:
+  #
+  #   - name: https
+  #     protocol: HTTPS
+  #     port: 443
+  #     tls:
+  #       mode: Terminate
+  #       certificateRefs:
+  #         - kind: Secret
+  #           name: banking-tls-secret
+  #     allowedRoutes:
+  #       namespaces:
+  #         from: Same
+
+---
+
+# ── 3. SecurityPolicy – CORS ─────────────────────────────────────
+# Replaces:
+#   nginx.ingress.kubernetes.io/enable-cors: "true"
+#   nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+#
+# Targeting the Gateway applies CORS to every HTTPRoute attached
+# to it. To restrict CORS to specific routes only, change
+# targetRef.kind to HTTPRoute and set the route name.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: banking-cors-policy
+  namespace: banking
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: banking-gateway
+  cors:
+    allowOrigins:
+      - "*"                 # mirrors cors-allow-origin: "*"
+    allowMethods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+    allowHeaders:
+      - "Authorization"
+      - "Content-Type"
+      - "Accept"
+      - "X-Requested-With"
+    maxAge: 86400           # browser may cache the preflight for 24 h
+
+---
+
+# ── 4. ClientTrafficPolicy – Request body size limit ────────────
+# Replaces:
+#   nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+#
+# 10 MiB = 10 × 1024 × 1024 = 10 485 760 bytes
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: banking-body-limit
+  namespace: banking
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: banking-gateway
+  http:
+    requestBodySizeLimitBytes: 10485760   # 10 MiB – matches proxy-body-size: 10m

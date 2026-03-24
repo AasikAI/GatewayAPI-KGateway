@@ -1,0 +1,102 @@
+# ================================================================
+# httproute.yaml  –  Replaces k8s/ingress.yaml (routing rules)
+# Namespace  : banking
+# Controller : Envoy Gateway
+# ================================================================
+#
+# One HTTPRoute per backend service, ordered most-specific → least.
+# All routes attach to the 'banking-gateway' defined in gateway.yaml.
+#
+# Service / port mapping (exact match from ingress.yaml):
+#   /api/users        → user-service        : 3001
+#   /api/accounts     → account-service     : 3002
+#   /api/transactions → transaction-service : 3003
+#   /                 → frontend            : 80
+#
+# ================================================================
+
+# ── 1. User Service ──────────────────────────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: user-service-route
+  namespace: banking
+spec:
+  parentRefs:
+    - name: banking-gateway
+      namespace: banking
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/users
+      backendRefs:
+        - name: user-service
+          port: 3001
+
+---
+
+# ── 2. Account Service ───────────────────────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: account-service-route
+  namespace: banking
+spec:
+  parentRefs:
+    - name: banking-gateway
+      namespace: banking
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/accounts
+      backendRefs:
+        - name: account-service
+          port: 3002
+
+---
+
+# ── 3. Transaction Service ───────────────────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: transaction-service-route
+  namespace: banking
+spec:
+  parentRefs:
+    - name: banking-gateway
+      namespace: banking
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/transactions
+      backendRefs:
+        - name: transaction-service
+          port: 3003
+
+---
+
+# ── 4. Frontend – catch-all ──────────────────────────────────────
+# '/' prefix matches everything not already claimed by the API
+# routes above. Keep this last in the file for clarity, but note
+# that Gateway API uses longest-prefix-match so order in YAML
+# does not actually affect precedence.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: frontend-route
+  namespace: banking
+spec:
+  parentRefs:
+    - name: banking-gateway
+      namespace: banking
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: frontend
+          port: 80
